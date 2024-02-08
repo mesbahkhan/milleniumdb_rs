@@ -1,7 +1,7 @@
 
 use std::sync::Arc;
 use std::time::{SystemTime, Duration};
-;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::time;
 use std::error::Error;
 
@@ -15,9 +15,9 @@ use crate::query::query_contexts::QueryContext;
 pub const DEFAULT_PORT: u16 = 8080;
 
 pub struct Server {
-    thread_info_vec_mutex: Mutex<()>,
+    //thread_info_vec_mutex: Mutex<()>,
     query_contexts: Vec<Arc<Mutex<QueryContext>>>,
-    shutdown_server: Arc<Mutex<bool>>,
+    pub shutdown_server: Arc<Mutex<bool>>,
     interrupt: Arc<Mutex<mpsc::Receiver<bool>>>,
 }
 
@@ -28,7 +28,7 @@ impl Server {
             shutdown_server: Arc::new(Mutex::new(false)),
             query_contexts: Vec::new(),
             interrupt: Arc::new(Mutex::new(mpsc::channel(1).1)),
-            thread_info_vec_mutex: Mutex::new(()),
+            //thread_info_vec_mutex: Mutex::new(()),
         }))
     }
 
@@ -60,18 +60,31 @@ impl Server {
     }
 
     pub async fn run(
-        server: Arc<Mutex<Self>>,       
-        
+        server: Arc<Mutex<Self>>,      
         port: u16,
-        worker_threads: usize, 
+        //worker_threads: usize, 
         _timeout: Duration) -> Result<(), Box<dyn Error>> {       
-          
+
+            let server_clone_for_signals = server.clone();
+            let server_clone_for_listener = server.clone();
+
+        let handle_interrupt = tokio::spawn(async move {
+            Server::handle_signals(server_clone_for_signals).await;
+        });
+
+        let server_loop = tokio::spawn(async move {
+            Server::start_listener(
+                server_clone_for_listener,
+                port).await; 
+        });
         
-        Server::start_listener(
-            server,
-            port).await;
+        handle_interrupt.await?;
+        server_loop.await?;
 
-
+        // tokio::select! {
+        //      _ = server_loop => {},
+        //      _ = handle_interrupt => {},
+        //  };
 
         Ok(())
     }
@@ -91,9 +104,7 @@ impl Server {
         let io_context = match io_context_result {
             Ok(runtime) => Arc::new(runtime),
             Err(e) => return Some(Err(Box::new(e))),
-                    };
-
-        //let server = Arc::new(Mutex::new(server.clone()));
+                    };        
 
         let server_weak = 
             Arc::downgrade(&server);
@@ -139,71 +150,29 @@ impl Server {
     
        
 
+    async fn handle_signals(server: Arc<Mutex<Server>>) {
+        let mut sigint = signal(SignalKind::interrupt()).expect("Failed to bind SIGINT handler");
+        let mut sigterm = signal(SignalKind::terminate()).expect("Failed to bind SIGTERM handler");
+    
+        tokio::select! {
+            _ = sigint.recv() => println!("Received SIGINT"),
+            _ = sigterm.recv() => println!("Received SIGTERM"),
+        }
+    
+        let server_guard = server.lock().await;
+        // Directly set the shutdown_server boolean value
+        *server_guard.shutdown_server.lock().await = true;
+        drop(server_guard);
+        // Additional shutdown logic here...
+    }
+
 }
+           
 
-
-
-
-
-
-
-
-
-                
-        //let mut server_clone = server.clone().lock().await;
-
-        //server_clone.query_contexts.resize_with(
-        //     worker_threads, || Arc::new(Mutex::new(QueryContext::new()))); 
 
    
     
-        // let (tx, mut rx) = mpsc::channel::<bool>(1);        
-        
-        // Capture SIGINT and SIGTERM to perform a clean shutdown        
-    
-        // let shutdown_server_interrupt_clone = server.shutdown_server.clone();
 
-        // let handle_interrupt = tokio::spawn(async move {
-        //     while rx.recv().await.is_some() {
-        //         let mut shutdown = shutdown_server_interrupt_clone.lock().await;
-        //         *shutdown = true;
-        //     }
-        // });
-    
-        // let shutdown_server_clone2 = server.shutdown_server.clone();
-
-        // let server_loop = tokio::spawn(async move {
-        //     loop {
-        //         let shutdown = shutdown_server_clone2.lock().await;
-        //         if *shutdown {
-        //             break;
-        //         }
-        //         // Assume handling connections asynchronously
-        //     }
-        // });
-        
-        // let mut handles = Vec::new();
-        // // Run the I/O service on the requested number of threads
-        // for i in 0..worker_threads {
-        //     let query_ctx = Arc::clone(&server.query_contexts[i]);
-        //     let handle = tokio::spawn(async move {
-        //         // Run your task here
-        //     });
-        //     handles.push(handle);
-        // }
-        
-        // println!("SPARQL Server running on port {}", port);
-        // println!("To terminate press CTRL-C");
-        
-        // server.execute_timeouts().await;
-
-        // // Block until all the threads exit
-        // // Wait for all tasks to complete
-        // for handle in handles {
-        // handle.await?;
-        // }
-
-        // // Wait for either server loop or interrupt handler to finish
         // tokio::select! {
         //     _ = server_loop => {},
         //     _ = handle_interrupt => {},

@@ -35,18 +35,23 @@ impl Listener {
 
     pub async fn run(&self) {
 
-        println!(
-            "Listening on port {}", 
-            self.acceptor
-                .lock()
-                .await
-                    .local_addr()
-                    .unwrap()
-                        .port());
-
+        println!("Listening on port {}", self.acceptor.lock().await.local_addr().unwrap().port());
+    
         loop {
+            // Attempt to upgrade the Weak pointer and access the shutdown flag
+            let shutdown = if let Some(server) = self.server.upgrade() {
+                // If upgrade succeeds, lock the server to access the shutdown_server flag
+                *server.lock().await.shutdown_server.lock().await
+            } else {
+                // If upgrade fails, assume the server no longer exists and break the loop
+                true
+            };
+    
+            if shutdown {
+                break;
+            }
+    
             let acceptor = Arc::clone(&self.acceptor);
-            
             match acceptor.lock().await.accept().await {
                 Ok((socket, _)) => {
                     self.handle_connection(socket).await;
@@ -56,8 +61,9 @@ impl Listener {
                 }
             };
         }
+        drop(self.server.upgrade());
+        println!("Listener shutting down.");
     }
-
     async fn handle_connection(&self, socket: TcpStream) {
         let server = match self.server.upgrade() {
             Some(server) => server,
