@@ -3,9 +3,8 @@ use std::error::Error;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
-use tokio::time::sleep;
-use crate::query::query_contexts::QueryContext;
 
+use crate::query::query_contexts::QueryContext;
 use crate::network::sparql_servers::Server;
 use crate::network::session::Session;
 
@@ -35,8 +34,19 @@ impl Listener {
     }
 
     pub async fn run(&self) {
+
+        println!(
+            "Listening on port {}", 
+            self.acceptor
+                .lock()
+                .await
+                    .local_addr()
+                    .unwrap()
+                        .port());
+
         loop {
             let acceptor = Arc::clone(&self.acceptor);
+            
             match acceptor.lock().await.accept().await {
                 Ok((socket, _)) => {
                     self.handle_connection(socket).await;
@@ -56,6 +66,7 @@ impl Listener {
                 return;
             }
         };
+
         let timeout = self.timeout;
         let query_ctx = Arc::new(Mutex::new(QueryContext::new()));
         let server_weak = self.server.clone();
@@ -64,6 +75,7 @@ impl Listener {
             let session = Session::new(server_weak, socket, timeout);
             session.run().await;
         });
+
     }
 }
 
