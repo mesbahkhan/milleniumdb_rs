@@ -10,8 +10,11 @@ pub async fn startup_server() -> Result<(), Box<dyn Error>> {
     // Load data into the server
     load_data_into_database().await;
 
+    
+
     // Start the server on a specific port with a specified number of worker threads and a timeout
-    server.run(1234, 4, tokio::time::Duration::from_secs(30)).await?;
+    Server::run(server, 1234, 4, tokio::time::Duration::from_secs(30)).await?;
+
 
     Ok(())
 }

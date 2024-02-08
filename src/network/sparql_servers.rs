@@ -1,3 +1,4 @@
+use std::f32::consts::E;
 use std::sync::Arc;
 use std::time::{SystemTime, Duration};
 use tokio::runtime::Runtime;
@@ -23,13 +24,13 @@ pub struct Server {
 
 impl Server {
 
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Arc<Mutex<Self>>  {
+        Arc::new(Mutex::new(Self {
             shutdown_server: Arc::new(Mutex::new(false)),
             query_contexts: Vec::new(),
             interrupt: Arc::new(Mutex::new(mpsc::channel(1).1)),
             thread_info_vec_mutex: Mutex::new(()),
-        }
+        }))
     }
 
     pub async fn execute_timeouts(&self) {
@@ -60,63 +61,60 @@ impl Server {
     }
 
     pub async fn run(
-        &mut self, 
+        server: Arc<Mutex<Self>>, 
         port: u16, 
         worker_threads: usize, 
         _timeout: Duration) -> Result<(), Box<dyn Error>> {
         
+
+            let io_context_result = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build();
+    
+        let io_context = match io_context_result {
+            Ok(runtime) => Arc::new(runtime),
+            Err(e) => return Err(Box::new(e)),
+        };
+    
+        // Assuming you have a way to properly reference `self` as needed for the Listener
+        //let server_arc_mutex = Arc::new(Mutex::new(self));
+        let server_weak = Arc::downgrade(&server);
+
         // Create and launch a listening port
         // Start the query service
-        tokio::spawn(async move {
-
-      
-            // let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)).await {
-            //     Ok(listener) => listener,
-            //     Err(e) => {
-            //         eprintln!("Failed to bind to port 1234: {}", e);
-            //         return; // Exit the task if we can't bind to the port
-            //     }
-            // };
-
-            // println!("Listening to port:{}", port);
-
-            // loop {
-            //     // Accept connections and process them
-            //     let (socket, _) = listener.accept().await.unwrap();
-            //     //process_query(socket).await;
-            // }
-            let io_context = Arc::new(tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .map_err(|e| Box::new(e) as Box<dyn Error>)); // Initialize your IO context
+        let handle = tokio::spawn(async move {     
 
             // Define the port and endpoint here...
             //let port = 1234; // Change to your desired port
             let endpoint = format!("127.0.0.1:{}", port).parse().unwrap(); // Change to your desired endpoint
 
             // Create a new instance of your Listener struct
-            let listener_result = Listener::new(Arc::downgrade(&self.thread_info_vec_mutex), io_context.clone(), endpoint, Duration::from_secs(10)).await;
+            let listener_result = Listener::new(server_weak, io_context, endpoint, Duration::from_secs(10)).await;
+                    
             if let Err(err) = listener_result {
                 eprintln!("Failed to create listener: {}", err);
-                return; // Exit the task if we can't create the listener
+                return ; // Exit the task if we can't create the listener
             }
             let listener = listener_result.unwrap();
 
-            // Run the listener
-            if let Err(err) = listener.run().await {
-                eprintln!("Listener error: {}", err);
-            }
+            listener.run().await;
             
         });
-    
-        self.query_contexts.resize_with(
+        
+        if let Err(e) = handle.await {
+            eprintln!("Listen spawn failed: {:?}", e);
+        }
+
+        let mut server = server.lock().await;
+
+        server.query_contexts.resize_with(
             worker_threads, || Arc::new(Mutex::new(QueryContext::new())));
     
         let (tx, mut rx) = mpsc::channel::<bool>(1);        
         
         // Capture SIGINT and SIGTERM to perform a clean shutdown        
     
-        let shutdown_server_interrupt_clone = self.shutdown_server.clone();
+        let shutdown_server_interrupt_clone = server.shutdown_server.clone();
 
         let handle_interrupt = tokio::spawn(async move {
             while rx.recv().await.is_some() {
@@ -125,7 +123,7 @@ impl Server {
             }
         });
     
-        let shutdown_server_clone2 = self.shutdown_server.clone();
+        let shutdown_server_clone2 = server.shutdown_server.clone();
 
         let server_loop = tokio::spawn(async move {
             loop {
@@ -140,7 +138,7 @@ impl Server {
         let mut handles = Vec::new();
         // Run the I/O service on the requested number of threads
         for i in 0..worker_threads {
-            let query_ctx = Arc::clone(&self.query_contexts[i]);
+            let query_ctx = Arc::clone(&server.query_contexts[i]);
             let handle = tokio::spawn(async move {
                 // Run your task here
             });
@@ -150,7 +148,7 @@ impl Server {
         println!("SPARQL Server running on port {}", port);
         println!("To terminate press CTRL-C");
         
-        self.execute_timeouts().await;
+        server.execute_timeouts().await;
 
         // Block until all the threads exit
         // Wait for all tasks to complete
