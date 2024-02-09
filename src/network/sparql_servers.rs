@@ -76,25 +76,22 @@ impl Server {
             Server::start_listener(
                 server_clone_for_listener,
                 port).await; 
-        });
-        
-        handle_interrupt.await?;
-        server_loop.await?;
+        });        
 
-        // tokio::select! {
-        //      _ = server_loop => {},
-        //      _ = handle_interrupt => {},
-        //  };
+
+        tokio::select! {
+             _ = server_loop => {},
+             _ = handle_interrupt => {},
+         };
 
         Ok(())
     }
 
     async fn start_listener(
         server: Arc<Mutex<Self>>,         
-        port: u16 ) -> Option<Result<(), Box<std::io::Error>>> {
-        
+        port: u16 ) -> Option<Result<(), Box<std::io::Error>>> {      
 
-        let server_clone = server.clone();
+
 
         let io_context_result = 
             tokio::runtime::Builder::new_multi_thread()
@@ -109,10 +106,10 @@ impl Server {
         let server_weak = 
             Arc::downgrade(&server);
 
-        let handle = tokio::spawn(async move {     
+        let listener_handle = tokio::spawn(async move {     
     
         // Define the port and endpoint here...
-        //let port = 1234; // Change to your desired port
+
         let endpoint = format!(
             "127.0.0.1:{}", 
             port)
@@ -140,11 +137,12 @@ impl Server {
                 });  
             
     
-        // Create and launch a listening port
+    
             
-        if let Err(e) = handle.await {
-        eprintln!("Listen spawn failed: {:?}", e);
+        if let Err(e) = listener_handle.await {
+                 eprintln!("Listen spawn failed: {:?}", e);
                 }
+        
         None
     }
     

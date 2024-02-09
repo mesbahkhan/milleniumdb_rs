@@ -48,6 +48,8 @@ impl Listener {
             };
     
             if shutdown {
+                println!("Shutting down listener.");
+                drop(self.server.upgrade());
                 break;
             }
     
@@ -61,10 +63,12 @@ impl Listener {
                 }
             };
         }
-        drop(self.server.upgrade());
+        
         println!("Listener shutting down.");
     }
+
     async fn handle_connection(&self, socket: TcpStream) {
+        
         let server = match self.server.upgrade() {
             Some(server) => server,
             None => {
@@ -74,8 +78,11 @@ impl Listener {
         };
 
         let timeout = self.timeout;
+
         let query_ctx = Arc::new(Mutex::new(QueryContext::new()));
+
         let server_weak = self.server.clone();
+
         tokio::spawn(async move {
             // Create session and run it
             let session = Session::new(server_weak, socket, timeout);

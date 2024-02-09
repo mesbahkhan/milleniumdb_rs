@@ -8,7 +8,7 @@ use clap::error::ErrorKind;
 use std::path::PathBuf;
 use std::process;
 
-
+use tokio::runtime::Builder;
 
 use server::sparql_server_orchestrator::startup_server;
 
@@ -61,17 +61,17 @@ async fn main() {
         process::exit(1);
     }
 
-    // Initialization and output code remains the same
-    match startup_server().await {
-        Ok(_) => {
-            println!("Server started successfully.");
-            // Continue with your server logic here
-        },
-        Err(e) => {
-            eprintln!("Failed to start server: {}", e);
-            process::exit(1); // Exit the program if the server fails to start
-        }
-    }
+        match startup_server().await {
+            Ok(_) => {
+                println!("Server started successfully.");
+                // Continue with your server logic here
+                },
+            Err(e) => {
+                eprintln!("Failed to start server: {}", e);
+                process::exit(1); // Exit the program if the server fails to start
+                }
+            }
+
 }
 
 fn validate_db_folder(path: &PathBuf) -> Result<(), String> {
